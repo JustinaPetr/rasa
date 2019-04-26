@@ -49,3 +49,4 @@ SQLAlchemy~=1.2.18
 psycopg2-binary==2.8.2
 kafka-python==1.4.4
 sklearn-crfsuite==0.3.6
+spacy
