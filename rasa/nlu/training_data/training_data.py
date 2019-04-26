@@ -18,6 +18,20 @@ DEFAULT_TRAINING_DATA_OUTPUT_PATH = "training_data.json"
 logger = logging.getLogger(__name__)
 
 
+class TrainingDataError(Exception):
+    """Raised when training data are invalid.
+
+    Attributes:
+        message -- explanation of why the training data are invalid
+    """
+
+    def __init__(self, message):
+        self.message = message
+
+    def __str__(self):
+        return self.message
+
+
 class TrainingData(object):
     """Holds loaded intent and entity training data."""
 
@@ -157,10 +171,13 @@ class TrainingData(object):
 
     def validate(self) -> None:
         """Ensures that the loaded training data is valid.
-
         Checks that the data has a minimum of certain training examples."""
 
         logger.debug("Validating training data...")
+
+        if not self.training_examples:
+            raise TrainingDataError("No training data present.")
+
         if "" in self.intents:
             warnings.warn(
                 "Found empty intent, please check your "

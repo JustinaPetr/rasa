@@ -19,6 +19,7 @@ from rasa.nlu.config import (
 )
 from rasa.nlu.persistor import Persistor
 from rasa.nlu.training_data import TrainingData, Message
+from rasa.nlu.training_data.training_data import TrainingDataError
 from rasa.nlu.utils import create_dir, write_json_to_file
 
 logger = logging.getLogger(__name__)
@@ -172,7 +173,11 @@ class Trainer(object):
 
         self.training_data = data
 
-        self.training_data.validate()
+        try:
+            self.training_data.validate()
+        except TrainingDataError as e:
+            logger.error("Training data invalid: {}".format(e.message))
+            return None
 
         context = kwargs
 
