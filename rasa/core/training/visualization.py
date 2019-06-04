@@ -269,7 +269,7 @@ async def _replace_edge_labels_with_nodes(
             graph.remove_edge(s, e, k)
             graph.add_node(
                 next_id,
-                label=label,
+                label=sanitize(label),
                 shape="rect",
                 style="filled",
                 fillcolor="lightblue",
@@ -300,7 +300,7 @@ def persist_graph(graph, output_file):
         "// { graph-content }", "graph = `{}`".format(expg.to_string()), 1
     )
 
-    with open(output_file, "w") as file:
+    with open(output_file, "w", encoding="utf-8") as file:
         file.write(template)
 
 
@@ -361,7 +361,7 @@ def _create_graph(fontsize: int = 12) -> "networkx.MultiDiGraph":
 
 def sanitize(s):
     if s:
-        return re.sub(r"""^[a-zA-Z0-9\s_-]""", "", s)
+        return re.escape(s)
     else:
         return s
 
@@ -376,8 +376,8 @@ def _add_message_edge(
     """Create an edge based on the user message."""
 
     if message:
-        message_key = sanitize(message.get("intent", {}).get("name", None))
-        message_label = sanitize(message.get("text", None))
+        message_key = message.get("intent", {}).get("name", None)
+        message_label = message.get("text", None)
     else:
         message_key = None
         message_label = None
@@ -464,7 +464,7 @@ async def visualize_neighborhood(
                     next_node_idx,
                     label="  ?  "
                     if not message
-                    else sanitize(message.get("intent", {})).get("name", "  ?  "),
+                    else sanitize(message.get("intent", {}).get("name", "  ?  ")),
                     shape="rect",
                     **{"class": "intent dashed active"}
                 )
@@ -529,7 +529,6 @@ async def visualize_stories(
     nlu_training_data: Optional["TrainingData"] = None,
     should_merge_nodes: bool = True,
     fontsize: int = 12,
-    silent: bool = False,
 ):
     """Given a set of stories, generates a graph visualizing the flows in the
     stories.
@@ -568,7 +567,7 @@ async def visualize_stories(
         tracker_limit=100,
         augmentation_factor=0,
     )
-    completed_trackers = g.generate(silent)
+    completed_trackers = g.generate()
     event_sequences = [t.events for t in completed_trackers]
 
     graph = await visualize_neighborhood(

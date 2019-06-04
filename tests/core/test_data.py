@@ -7,6 +7,8 @@ import pytest
 
 import rasa.data as data
 from tests.core.conftest import DEFAULT_STORIES_FILE, DEFAULT_NLU_DATA
+from rasa.nlu.training_data import load_data
+from rasa.nlu.utils import json_to_string
 
 
 def test_get_core_directory(project):
@@ -28,6 +30,30 @@ def test_get_nlu_directory(project):
     assert nlu_files[0].endswith("nlu.md")
 
 
+def test_get_nlu_file(project):
+    data_file = os.path.join(project, "data/nlu.md")
+    nlu_directory = data.get_nlu_directory(data_file)
+
+    nlu_files = os.listdir(nlu_directory)
+
+    original = load_data(data_file)
+    copied = load_data(nlu_directory)
+
+    assert nlu_files[0].endswith("nlu.md")
+    assert original.intent_examples == copied.intent_examples
+
+
+def test_get_core_nlu_files(project):
+    data_dir = os.path.join(project, "data")
+    core_files, nlu_files = data.get_core_nlu_files([data_dir])
+
+    assert len(nlu_files) == 1
+    assert list(nlu_files)[0].endswith("nlu.md")
+
+    assert len(core_files) == 1
+    assert list(core_files)[0].endswith("stories.md")
+
+
 def test_get_core_nlu_directories(project):
     data_dir = os.path.join(project, "data")
     core_directory, nlu_directory = data.get_core_nlu_directories([data_dir])
@@ -41,6 +67,13 @@ def test_get_core_nlu_directories(project):
 
     assert len(stories) == 1
     assert stories[0].endswith("stories.md")
+
+
+def test_get_core_nlu_directories_with_none():
+    directories = data.get_core_nlu_directories(None)
+
+    assert all([directory for directory in directories])
+    assert all([not os.listdir(directory) for directory in directories])
 
 
 def test_same_file_names_get_resolved(tmpdir):
@@ -96,8 +129,8 @@ def test_is_nlu_file_with_json():
 
     directory = tempfile.mkdtemp()
     file = os.path.join(directory, "test.json")
-    with open(file, "w") as f:
-        f.write(json.dumps(test))
+    with open(file, "w", encoding="utf-8") as f:
+        f.write(json_to_string(test))
 
     assert data._is_nlu_file(file)
 
@@ -105,7 +138,7 @@ def test_is_nlu_file_with_json():
 def test_is_not_nlu_file_with_json():
     directory = tempfile.mkdtemp()
     file = os.path.join(directory, "test.json")
-    with open(file, "w") as f:
+    with open(file, "w", encoding="utf-8") as f:
         f.write('{"test": "a"}')
 
     assert not data._is_nlu_file(file)

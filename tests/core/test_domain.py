@@ -1,9 +1,11 @@
 import json
+
 import pytest
+from _pytest.tmpdir import TempdirFactory
 
 import rasa.utils.io
-from rasa.core import training
-from rasa.core.domain import Domain
+from rasa.core import training, utils
+from rasa.core.domain import Domain, InvalidDomain
 from rasa.core.featurizers import MaxHistoryTrackerFeaturizer
 from rasa.core.slots import TextSlot
 from tests.core import utilities
@@ -119,8 +121,8 @@ def test_utter_templates():
     expected_template = {
         "text": "Hey! How are you?",
         "buttons": [
-            {"title": "great", "payload": "great"},
-            {"title": "super sad", "payload": "super sad"},
+            {"title": "great", "payload": "/mood_great"},
+            {"title": "super sad", "payload": "/mood_unhappy"},
         ],
     }
     assert domain.random_template_for("utter_greet") == expected_template
@@ -131,6 +133,20 @@ def test_restaurant_domain_is_valid():
     Domain.validate_domain_yaml(
         rasa.utils.io.read_file("examples/restaurantbot/domain.yml")
     )
+
+
+def test_validate_on_invalid_domain():
+    with pytest.raises(InvalidDomain):
+        Domain.validate_domain_yaml(
+            rasa.utils.io.read_file("data/test_domains/invalid_format.yml")
+        )
+
+
+def test_validate_on_fails_on_nlu_data():
+    with pytest.raises(InvalidDomain):
+        Domain.validate_domain_yaml(
+            rasa.utils.io.read_file("examples/restaurantbot/data/nlu.md")
+        )
 
 
 def test_custom_slot_type(tmpdir):
@@ -144,7 +160,7 @@ def test_custom_slot_type(tmpdir):
 
        templates:
          utter_greet:
-           - hey there!
+           - text: hey there!
 
        actions:
          - utter_greet """,
@@ -162,7 +178,7 @@ def test_custom_slot_type(tmpdir):
 
     templates:
         utter_greet:
-         - hey there!
+         - text: hey there!
 
     actions:
         - utter_greet""",
@@ -173,7 +189,7 @@ def test_custom_slot_type(tmpdir):
 
     templates:
         utter_greet:
-         - hey there!
+         - text: hey there!
 
     actions:
         - utter_greet""",
@@ -268,19 +284,19 @@ templates:
             {"greet": {"use_entities": False}, "goodbye": {"use_entities": True}},
         ),
         (
-            [{"greet": {"maps_to": "utter_goodbye"}}, "goodbye"],
+            [{"greet": {"triggers": "utter_goodbye"}}, "goodbye"],
             {
-                "greet": {"use_entities": True, "maps_to": "utter_goodbye"},
+                "greet": {"use_entities": True, "triggers": "utter_goodbye"},
                 "goodbye": {"use_entities": True},
             },
         ),
         (
             [
-                {"greet": {"maps_to": "utter_goodbye", "use_entities": False}},
+                {"greet": {"triggers": "utter_goodbye", "use_entities": False}},
                 {"goodbye": {"use_entities": False}},
             ],
             {
-                "greet": {"use_entities": False, "maps_to": "utter_goodbye"},
+                "greet": {"use_entities": False, "triggers": "utter_goodbye"},
                 "goodbye": {"use_entities": False},
             },
         ),
@@ -288,3 +304,138 @@ templates:
 )
 def test_collect_intent_properties(intent_list, intent_properties):
     assert Domain.collect_intent_properties(intent_list) == intent_properties
+
+
+def test_load_domain_from_directory_tree(tmpdir_factory: TempdirFactory):
+    root = tmpdir_factory.mktemp("Parent Bot")
+    root_domain = {"actions": ["utter_root", "utter_root2"]}
+    utils.dump_obj_as_yaml_to_file(root / "domain.yml", root_domain)
+
+    subdirectory_1 = root / "Skill 1"
+    subdirectory_1.mkdir()
+    skill_1_domain = {"actions": ["utter_skill_1"]}
+    utils.dump_obj_as_yaml_to_file(subdirectory_1 / "domain.yml", skill_1_domain)
+
+    subdirectory_2 = root / "Skill 2"
+    subdirectory_2.mkdir()
+    skill_2_domain = {"actions": ["utter_skill_2"]}
+    utils.dump_obj_as_yaml_to_file(subdirectory_2 / "domain.yml", skill_2_domain)
+
+    subsubdirectory = subdirectory_2 / "Skill 2-1"
+    subsubdirectory.mkdir()
+    skill_2_1_domain = {"actions": ["utter_subskill", "utter_root"]}
+    # Check if loading from `.yaml` also works
+    utils.dump_obj_as_yaml_to_file(subsubdirectory / "domain.yaml", skill_2_1_domain)
+
+    subsubdirectory_2 = subdirectory_2 / "Skill 2-2"
+    subsubdirectory_2.mkdir()
+    excluded_domain = {"actions": ["should not be loaded"]}
+    utils.dump_obj_as_yaml_to_file(
+        subsubdirectory_2 / "other_name.yaml", excluded_domain
+    )
+
+    actual = Domain.load(str(root))
+    expected = [
+        "utter_root",
+        "utter_root2",
+        "utter_skill_1",
+        "utter_skill_2",
+        "utter_subskill",
+    ]
+
+    assert set(actual.user_actions) == set(expected)
+
+
+def test_domain_warnings():
+    domain = Domain.load(DEFAULT_DOMAIN_PATH)
+
+    warning_types = ["action_warnings", "intent_warnings", "entity_warnings"]
+
+    actions = ["action_1", "action_2"]
+    intents = ["intent_1", "intent_2"]
+    entities = ["entity_1", "entity_2"]
+    slots = ["slot_1", "slot_2"]
+    domain_warnings = domain.domain_warnings(
+        intents=intents, entities=entities, actions=actions, slots=slots
+    )
+
+    # elements not found in domain should be in `in_training_data` diff
+    for _type, elements in zip(warning_types, [actions, intents, entities]):
+        assert set(domain_warnings[_type]["in_training_data"]) == set(elements)
+
+    # all other domain elements should be in `in_domain` diff
+    for _type, elements in zip(
+        warning_types, [domain.user_actions, domain.intents, domain.entities]
+    ):
+        assert set(domain_warnings[_type]["in_domain"]) == set(elements)
+
+    # fully aligned domain and elements should yield empty diff
+    domain_warnings = domain.domain_warnings(
+        intents=domain.intents,
+        entities=domain.entities,
+        actions=domain.user_actions,
+        slots=[s.name for s in domain.slots],
+    )
+
+    for diff_dict in domain_warnings.values():
+        assert all(not diff_set for diff_set in diff_dict.values())
+
+
+def test_check_domain_sanity_on_invalid_domain():
+    with pytest.raises(InvalidDomain):
+        Domain(
+            intent_properties={},
+            entities=[],
+            slots=[],
+            templates={},
+            action_names=["random_name", "random_name"],
+            form_names=[],
+        )
+
+    with pytest.raises(InvalidDomain):
+        Domain(
+            intent_properties={},
+            entities=[],
+            slots=[TextSlot("random_name"), TextSlot("random_name")],
+            templates={},
+            action_names=[],
+            form_names=[],
+        )
+
+    with pytest.raises(InvalidDomain):
+        Domain(
+            intent_properties={},
+            entities=["random_name", "random_name", "other_name", "other_name"],
+            slots=[],
+            templates={},
+            action_names=[],
+            form_names=[],
+        )
+
+    with pytest.raises(InvalidDomain):
+        Domain(
+            intent_properties={},
+            entities=[],
+            slots=[],
+            templates={},
+            action_names=[],
+            form_names=["random_name", "random_name"],
+        )
+
+
+def test_load_on_invalid_domain():
+    with pytest.raises(InvalidDomain):
+        Domain.load("data/test_domains/duplicate_intents.yml")
+
+    with pytest.raises(InvalidDomain):
+        Domain.load("data/test_domains/duplicate_actions.yml")
+
+    with pytest.raises(InvalidDomain):
+        Domain.load("data/test_domains/duplicate_templates.yml")
+
+    with pytest.raises(InvalidDomain):
+        Domain.load("data/test_domains/duplicate_entities.yml")
+
+    # Currently just deprecated
+    # with pytest.raises(InvalidDomain):
+    #     Domain.load("data/test_domains/missing_text_for_templates.yml")

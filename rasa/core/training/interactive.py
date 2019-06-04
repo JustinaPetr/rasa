@@ -18,9 +18,14 @@ from terminaltables import AsciiTable, SingleTable
 import questionary
 import rasa.cli.utils
 from questionary import Choice, Form, Question
+
 from rasa.cli import utils as cliutils
 from rasa.core import constants, events, run, train, utils
-from rasa.core.actions.action import ACTION_LISTEN_NAME, default_action_names
+from rasa.core.actions.action import (
+    ACTION_LISTEN_NAME,
+    default_action_names,
+    UTTER_PREFIX,
+)
 from rasa.core.channels import UserMessage
 from rasa.core.channels.channel import button_to_string, element_to_string
 from rasa.core.constants import (
@@ -40,6 +45,7 @@ from rasa.core.training.visualization import (
     visualize_neighborhood,
 )
 from rasa.core.utils import AvailableEndpoints
+from rasa.utils.common import update_sanic_log_level
 from rasa.utils.endpoints import EndpointConfig
 
 # noinspection PyProtectedMember
@@ -51,6 +57,7 @@ from rasa.nlu.training_data.message import Message
 # automatically. If you change anything in here, please make sure to
 # run the interactive learning and check if your part of the "ui"
 # still works.
+from rasa.utils.io import create_path
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +118,7 @@ async def send_message(
 
     payload = {
         "sender": UserUttered.type_name,
-        "message": message,
+        "text": message,
         "parse_data": parse_data,
     }
 
@@ -631,7 +638,7 @@ async def _request_action_from_user(
     if is_new_action:
         # create new action
         action_name = await _request_free_text_action(sender_id, endpoint)
-        if "utter_" in action_name:
+        if action_name.startswith(UTTER_PREFIX):
             utter_message = await _request_free_text_utterance(
                 sender_id, endpoint, action_name
             )
@@ -746,11 +753,18 @@ async def _write_stories_to_file(
 
     sub_conversations = _split_conversation_at_restarts(evts)
 
-    with open(export_story_path, "a", encoding="utf-8") as f:
+    create_path(export_story_path)
+
+    if os.path.exists(export_story_path):
+        append_write = "a"  # append if already exists
+    else:
+        append_write = "w"  # make a new file if not
+
+    with open(export_story_path, append_write, encoding="utf-8") as f:
         for conversation in sub_conversations:
             parsed_events = events.deserialise_events(conversation)
             s = Story.from_events(parsed_events)
-            f.write(s.as_story_string(flat=True) + "\n")
+            f.write("\n" + s.as_story_string(flat=True))
 
 
 async def _write_nlu_to_file(
@@ -815,6 +829,8 @@ async def _write_domain_to_file(
 ) -> None:
     """Write an updated domain file to the file path."""
 
+    create_path(domain_path)
+
     domain = await retrieve_domain(endpoint)
     old_domain = Domain.from_dict(domain)
 
@@ -878,6 +894,27 @@ async def _predict_till_next_listen(
         )
 
         await _plot_trackers(sender_ids, plot_file, endpoint)
+
+    tracker_dump = await retrieve_tracker(
+        endpoint, sender_id, EventVerbosity.AFTER_RESTART
+    )
+    events = tracker_dump.get("events", [])
+    last_event = events[-2]  # last event before action_listen
+    # if bot message includes buttons the user will get a list choice to reply
+    # the list choice is displayed in place of action listen
+    if last_event.get("event") == BotUttered.type_name and last_event["data"].get(
+        "buttons", None
+    ):
+        data = last_event["data"]
+        message = last_event.get("text", "")
+        choices = [
+            button_to_string(button, idx)
+            for idx, button in enumerate(data.get("buttons"))
+        ]
+
+        question = questionary.select(message, choices)
+        button_payload = cliutils.payload_from_button_question(question)
+        await send_message(endpoint, sender_id, button_payload)
 
 
 async def _correct_wrong_nlu(
@@ -1388,7 +1425,10 @@ def _serve_application(app, stories, finetune, skip_visualization):
         running_app.stop()  # kill the sanic server
 
     app.add_task(run_interactive_io)
-    app.run(host="0.0.0.0", port=DEFAULT_SERVER_PORT, access_log=True)
+
+    update_sanic_log_level()
+
+    app.run(host="0.0.0.0", port=DEFAULT_SERVER_PORT)
 
     return app
 
@@ -1416,6 +1456,8 @@ def start_visualization(image_path: Text = None) -> None:
             return response.file(os.path.abspath(image_path), headers=headers)
         except FileNotFoundError:
             return response.text("", 404)
+
+    update_sanic_log_level()
 
     app.run(host="0.0.0.0", port=DEFAULT_SERVER_PORT + 1, access_log=False)
 
@@ -1496,14 +1538,9 @@ def run_interactive_learning(
 
     # before_server_start handlers make sure the agent is loaded before the
     # interactive learning IO starts
-    if server_args.get("core"):
+    if server_args.get("model"):
         app.register_listener(
-            partial(
-                run.load_agent_on_start,
-                server_args.get("core"),
-                endpoints,
-                server_args.get("nlu"),
-            ),
+            partial(run.load_agent_on_start, server_args.get("model"), endpoints, None),
             "before_server_start",
         )
     else:

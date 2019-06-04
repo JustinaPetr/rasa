@@ -138,9 +138,18 @@ class TrainingData(object):
             os.makedirs(dir_name)
 
         data_file = os.path.join(dir_name, filename)
-        write_to_file(data_file, self.as_json(indent=2))
 
-        return {"training_data": DEFAULT_TRAINING_DATA_OUTPUT_PATH}
+        if data_file.endswith("json"):
+            write_to_file(data_file, self.as_json(indent=2))
+        elif data_file.endswith("md"):
+            write_to_file(data_file, self.as_markdown())
+        else:
+            ValueError(
+                "Unsupported file format detected. Supported file formats are 'json' "
+                "and 'md'."
+            )
+
+        return {"training_data": data_file}
 
     def sorted_entities(self) -> List[Any]:
         """Extract all entities from examples and sorts them by entity type."""

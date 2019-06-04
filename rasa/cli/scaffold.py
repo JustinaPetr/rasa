@@ -5,7 +5,12 @@ from typing import List, Text
 import rasa.train
 from rasa.cli.shell import shell
 from rasa.cli.utils import create_output_path, print_success
-from rasa.constants import DEFAULT_CONFIG_PATH, DEFAULT_DATA_PATH, DEFAULT_DOMAIN_PATH
+from rasa.constants import (
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_DATA_PATH,
+    DEFAULT_DOMAIN_PATH,
+    DOCS_BASE_URL,
+)
 
 
 # noinspection PyProtectedMember
@@ -13,13 +18,15 @@ def add_subparser(
     subparsers: argparse._SubParsersAction, parents: List[argparse.ArgumentParser]
 ):
     scaffold_parser = subparsers.add_parser(
-        "init", parents=parents, help="Create a new project from a initial_project"
+        "init",
+        parents=parents,
+        help="Creates a new project, with example training data, actions, and config files.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     scaffold_parser.add_argument(
-        "--no_prompt",
         "--no-prompt",
         action="store_true",
-        help="Automatic yes or default options to prompts and uppressed warnings",
+        help="Automatically choose default options for prompts and suppress warnings.",
     )
     scaffold_parser.set_defaults(func=run)
 
@@ -30,7 +37,7 @@ def print_train_or_instructions(args: argparse.Namespace, path: Text) -> None:
     print_success("Finished creating project structure.")
 
     should_train = questionary.confirm(
-        "Do you want me to train an initial model for the bot? 💪🏽"
+        "Do you want to train an initial model? 💪🏽"
     ).skip_if(args.no_prompt, default=True)
 
     if should_train:
@@ -46,7 +53,7 @@ def print_train_or_instructions(args: argparse.Namespace, path: Text) -> None:
 
     else:
         print_success(
-            "No problem 👍🏼. You can also train me later by going "
+            "No problem 👍🏼. You can also train a model later by going "
             "to the project directory and running 'rasa train'."
             "".format(path)
         )
@@ -58,7 +65,7 @@ def print_run_or_instructions(args: argparse.Namespace, path: Text) -> None:
 
     should_run = (
         questionary.confirm(
-            "Do you want to speak to the trained bot on the command line? 🤖"
+            "Do you want to speak to the trained assistant on the command line? 🤖"
         )
         .skip_if(args.no_prompt, default=False)
         .ask()
@@ -82,11 +89,21 @@ def print_run_or_instructions(args: argparse.Namespace, path: Text) -> None:
 
         shell(args)
     else:
-        print_success(
-            "Ok 👍🏼. If you want to speak to the bot later, "
-            "change into the project directory and run 'rasa shell'."
-            "".format(path)
-        )
+        if args.no_prompt:
+            print (
+                "If you want to speak to the assistant, "
+                "run 'rasa shell' at any time inside "
+                "the project directory."
+                "".format(path)
+            )
+        else:
+            print_success(
+                "Ok 👍🏼. "
+                "If you want to speak to the assistant, "
+                "run 'rasa shell' at any time inside "
+                "the project directory."
+                "".format(path)
+            )
 
 
 def init_project(args: argparse.Namespace, path: Text) -> None:
@@ -108,9 +125,7 @@ def scaffold_path() -> Text:
 
 
 def print_cancel() -> None:
-    print_success(
-        "Ok. Then I stop here. If you need me again, simply type 'rasa init' 🙋🏽‍♀️"
-    )
+    print_success("Ok. You can continue setting up by running 'rasa init' 🙋🏽‍♀️")
     exit(0)
 
 
@@ -118,15 +133,12 @@ def _ask_create_path(path: Text) -> None:
     import questionary
 
     should_create = questionary.confirm(
-        "Path '{}' does not exist 🧐. Should I create it?".format(path)
+        "Path '{}' does not exist 🧐. Create path?".format(path)
     ).ask()
     if should_create:
         os.makedirs(path)
     else:
-        print_success(
-            "Ok. Then I stop here. If you need me again, simply type "
-            "'rasa init' 🙋🏽‍♀️"
-        )
+        print_success("Ok. You can continue setting up by running " "'rasa init' 🙋🏽‍♀️")
         exit(0)
 
 
@@ -144,19 +156,26 @@ def run(args: argparse.Namespace) -> None:
     import questionary
 
     print_success("Welcome to Rasa! 🤖\n")
-    print (
-        "To get started quickly, I can assist you to create an "
-        "initial project.\n"
-        "If you need some help to get from this template to a "
-        "bad ass contextual assistant, checkout our quickstart guide"
-        "here: https://rasa.com/docs/core/quickstart \n\n"
-        "Now let's start! 👇🏽\n"
-    )
+    if args.no_prompt:
+        print (
+            "To get started quickly, an "
+            "initial project will be created.\n"
+            "If you need some help, check out "
+            "the documentation at {}.\n".format(DOCS_BASE_URL)
+        )
+    else:
+        print (
+            "To get started quickly, an "
+            "initial project will be created.\n"
+            "If you need some help, check out "
+            "the documentation at {}.\n"
+            "Now let's start! 👇🏽\n".format(DOCS_BASE_URL)
+        )
 
     path = (
         questionary.text(
-            "Please enter a folder path where I should create "
-            "the initial project [default: current directory]",
+            "Please enter a path where the project will be "
+            "created [default: current directory]",
             default=".",
         )
         .skip_if(args.no_prompt, default=".")

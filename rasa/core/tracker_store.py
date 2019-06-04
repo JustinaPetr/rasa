@@ -1,7 +1,7 @@
 import json
 import logging
 import pickle
-from typing import Iterator, KeysView, List, Optional, Text
+from typing import Iterator, Optional, Text, Iterable
 
 import itertools
 
@@ -12,7 +12,7 @@ from rasa.core.actions.action import ACTION_LISTEN_NAME
 from rasa.core.broker import EventChannel
 from rasa.core.domain import Domain
 from rasa.core.trackers import ActionExecuted, DialogueStateTracker, EventVerbosity
-from rasa.core.utils import class_from_module_path
+from rasa.utils.common import class_from_module_path
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,7 @@ class TrackerStore(object):
             body.update(evt.as_dict())
             self.event_broker.publish(body)
 
-    def keys(self) -> List[Text]:
+    def keys(self) -> Iterable[Text]:
         raise NotImplementedError()
 
     @staticmethod
@@ -138,12 +138,12 @@ class InMemoryTrackerStore(TrackerStore):
             logger.debug("Creating a new tracker for id '{}'.".format(sender_id))
             return None
 
-    def keys(self) -> KeysView[Text]:
+    def keys(self) -> Iterable[Text]:
         return self.store.keys()
 
 
 class RedisTrackerStore(TrackerStore):
-    def keys(self) -> List[Text]:
+    def keys(self) -> Iterable[Text]:
         return self.red.keys()
 
     def __init__(
@@ -257,7 +257,7 @@ class MongoTrackerStore(TrackerStore):
         else:
             return None
 
-    def keys(self) -> List[Text]:
+    def keys(self) -> Iterable[Text]:
         return [c["sender_id"] for c in self.conversations.find()]
 
 
@@ -274,7 +274,7 @@ class SQLTrackerStore(TrackerStore):
         __tablename__ = "events"
 
         id = Column(Integer, primary_key=True)
-        sender_id = Column(String, nullable=False)
+        sender_id = Column(String, nullable=False, index=True)
         type_name = Column(String, nullable=False)
         timestamp = Column(Float)
         intent_name = Column(String)
@@ -380,10 +380,9 @@ class SQLTrackerStore(TrackerStore):
         cursor.close()
         conn.close()
 
-    def keys(self) -> List[Text]:
-        """Collect all keys of the items stored in the database."""
-        # noinspection PyUnresolvedReferences
-        return self.SQLEvent.__table__.columns.keys()
+    def keys(self) -> Iterable[Text]:
+        sender_ids = self.session.query(self.SQLEvent.sender_id).distinct().all()
+        return [sender_id for (sender_id,) in sender_ids]
 
     def retrieve(self, sender_id: Text) -> DialogueStateTracker:
         """Create a tracker from all previously stored events."""
